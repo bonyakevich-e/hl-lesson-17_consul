@@ -145,25 +145,6 @@ vim /etc/consul.d/backend.hcl
 
 -------------------------- frontend servers --------------------------
 
-curl -L  https://releases.hashicorp.com/consul-template/0.39.0/consul-template_0.39.1_linux_amd64.zip -o consul-template.zip
-unzip consul-template.zip -d  /usr/bin/
-
-consul-template --version
-
-vim /etc/nginx/sites-enabled/frontend-balancer.conf.ctmpl
-
-upstream backend {
- {{- range service "backend" }} 
-  server {{ .Address }}:{{ .Port }}; 
- {{- end }} 
-}
-
-server {
-   listen 80;
-
-   location / {
-      proxy_pass http://backend;
-   }
-}
+in ansible playbook
 
 
