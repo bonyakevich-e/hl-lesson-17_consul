@@ -1,0 +1,169 @@
+------------------------------------- consule server
+
+apt install unzip
+wget -O consul_1.20.2_linux_amd64.zip https://hashicorp-releases.yandexcloud.net/consul/1.20.2/consul_1.20.2_linux_amd64.zip
+unzip consul_1.20.2_linux_amd64.zip -d /usr/bin/
+
+useradd -r -c 'Consul DCS service' consul
+mkdir -p /var/lib/consul /etc/consul.d
+chown consul:consul /var/lib/consul /etc/consul.d
+chmod 775 /var/lib/consul /etc/consul.d
+
+Сгенерируем ключ для консула:
+
+consul keygen
+CONSUL_TOKEN=jawwzaBySYKnEbK/iBPNUp7jMZPb1STcO67gEmEbNgA=
+
+vim /etc/consul.d/config.hcl
+
+"bind_addr" = "0.0.0.0"
+"client_addr" = "0.0.0.0"
+"encrypt" = "jawwzaBySYKnEbK/iBPNUp7jMZPb1STcO67gEmEbNgA="
+"datacenter" = "dc1"
+"data_dir" = "/var/lib/consul"
+"server" = true
+"log_level" = "INFO"
+ui_config {
+  enabled= true
+}
+
+consul validate /etc/consul.d
+
+vim /etc/systemd/system/consul.service
+
+[Unit]
+Description=Consul Service Discovery Agent
+Documentation=https://www.consul.io/
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=consul
+Group=consul
+ExecStart=/usr/bin/consul agent \
+    -config-dir=/etc/consul.d
+ExecReload=/bin/kill -HUP $MAINPID
+KillSignal=SIGINT
+TimeoutStopSec=5
+Restart=on-failure
+SyslogIdentifier=consul
+
+[Install]
+WantedBy=multi-user.target
+
+systemctl start consul
+systemctl enable consul
+systemctl status consul
+
+consul members
+consul members -detailed
+http://158.160.88.11:8500/
+
+
+---------------------------------- backend servers --------------------------------
+
+apt install nginx
+
+vim /var/www/html/index.nginx-debian.html
+
+<!DOCTYPE html>
+<html>
+<head>
+        <title>Backend Server </title>
+</head>
+<body>
+        <h1>This is Backend SERVER-01</h1>
+</body>
+</html>
+
+
+apt install unzip
+wget -O consul_1.20.2_linux_amd64.zip https://hashicorp-releases.yandexcloud.net/consul/1.20.2/consul_1.20.2_linux_amd64.zip
+unzip consul_1.20.2_linux_amd64.zip -d /usr/bin/
+
+useradd -r -c 'Consul DCS service' consul
+mkdir -p /var/lib/consul /etc/consul.d
+chown consul:consul /var/lib/consul /etc/consul.d
+chmod 775 /var/lib/consul /etc/consul.d
+
+
+vim /etc/consul.d/config.hcl
+
+"encrypt" = "jawwzaBySYKnEbK/iBPNUp7jMZPb1STcO67gEmEbNgA="
+"datacenter" = "dc1"
+"data_dir" = "/var/lib/consul"
+"server" = false
+"log_level" = "INFO"
+"enable_script_checks" = true
+"enable_syslog" = true
+"leave_on_terminate" = true
+"retry_join" = ["consul"]
+
+consul validate /etc/consul.d
+
+vim /etc/systemd/system/consul.service
+
+[Unit]
+Description=Consul Service Discovery Agent
+Documentation=https://www.consul.io/
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=consul
+Group=consul
+ExecStart=/usr/bin/consul agent \
+    -config-dir=/etc/consul.d
+ExecReload=/bin/kill -HUP $MAINPID
+KillSignal=SIGINT
+TimeoutStopSec=5
+Restart=on-failure
+SyslogIdentifier=consul
+
+[Install]
+WantedBy=multi-user.target
+
+systemctl start consul
+systemctl enable consul
+systemctl status consul
+
+If error "No installed keys could decrypt the message" then: 
+rm /var/lib/consul/serf/local.keyring
+
+vim /etc/consul.d/backend.hcl
+
+"service" = {
+  "Name" = "backend"
+  "Port" = 80
+  "check" = {
+    "args" = ["curl", "localhost"]
+    "interval" = "3s"
+  }
+}
+
+-------------------------- frontend servers --------------------------
+
+curl -L  https://releases.hashicorp.com/consul-template/0.39.0/consul-template_0.39.1_linux_amd64.zip -o consul-template.zip
+unzip consul-template.zip -d  /usr/bin/
+
+consul-template --version
+
+vim /etc/nginx/sites-enabled/frontend-balancer.conf.ctmpl
+
+upstream backend {
+ {{- range service "backend" }} 
+  server {{ .Address }}:{{ .Port }}; 
+ {{- end }} 
+}
+
+server {
+   listen 80;
+
+   location / {
+      proxy_pass http://backend;
+   }
+}
+
+

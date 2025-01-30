@@ -1,0 +1,9 @@
+"encrypt" = ""
+"datacenter" = "dc1"
+"data_dir" = "/var/lib/consul"
+"server" = false
+"log_level" = "INFO"
+"enable_script_checks" = true
+"enable_syslog" = true
+"leave_on_terminate" = true
+"retry_join" = ["consul"]

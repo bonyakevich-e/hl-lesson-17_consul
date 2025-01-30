@@ -1,0 +1,18 @@
+[Unit]
+Description=Consul-Template Daemon
+Documentation=https://github.com/hashicorp/consul-template/
+Wants=basic.target
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/consul-template -config=/etc/consul-template.d/
+SuccessExitStatus=12
+ExecReload=/bin/kill -HUP $MAINPID
+KillSignal=SIGINT
+KillMode=process
+Restart=on-failure
+RestartSec=42s
+LimitNOFILE=4096
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,257 @@
+---
+- hosts: all
+  tags: setup prereq
+  remote_user: ${remote_user}
+  become: yes
+  gather_facts: no
+  tasks:
+  
+# ждем пока виртуальные машины придут в себя. иначе могу быть баги с утановкой пакетов  
+  - name: Pause for 2 minutes
+    ansible.builtin.pause:
+      minutes: 2
+
+  - name: Wait for system to become reachable
+    ansible.builtin.wait_for_connection:
+
+  - name: Gather facts manually
+    ansible.builtin.setup:
+  
+  - name: Set timezone
+    timezone:
+      name: Europe/Moscow
+  
+  - name: Add entries to hosts
+    copy:
+      dest: /etc/hosts
+      content: "#\n
+127.0.0.1	localhost\n
+%{ for node in backend ~}
+${node.network_interface.0.ip_address}	${node.hostname}\n
+%{ endfor ~}
+%{ for node in frontend ~}
+${node.network_interface.0.ip_address}	${node.hostname}\n
+%{ endfor ~}
+${consul.network_interface.0.ip_address}	${consul.hostname}\n
+"
+
+  - name: Install prerequirments
+    ansible.builtin.apt: 
+      name: 
+        - unzip
+      state: present
+      update_cache: true
+
+# =============================== setup consul ===============================
+
+- hosts: consul
+  tags: setup consul server
+  remote_user: ${remote_user}
+  become: yes
+  tasks:
+
+  - name: Get and unzip consul binary
+    ansible.builtin.unarchive:
+      src: https://hashicorp-releases.yandexcloud.net/consul/1.20.2/consul_1.20.2_linux_amd64.zip
+      dest: /usr/bin/
+      remote_src: yes
+  
+  - name: Add consule user
+    ansible.builtin.user:
+      name: consul
+      comment: Consul service
+
+  - name: Create consul directories
+    ansible.builtin.file:
+      path: "{{ item }}"
+      state: directory
+      owner: consul
+      group: consul
+      mode: '755'
+    with_items:
+      - /var/lib/consul
+      - /etc/consul.d
+
+  - name: Copy consul server config
+    ansible.builtin.copy:
+      src: templates/consul/config.hcl-server
+      dest: /etc/consul.d/config.hcl
+      owner: consul
+      group: consul
+
+  - name: Generate consul encryption key
+    ansible.builtin.command: consul keygen
+    register: encrypt_key
+
+  - name: Set_fact consul encryption key
+    set_fact:
+      consul_encrypt_key: "{{encrypt_key.stdout}}"  
+
+  - name: Change encrypt option in config.hcl
+    ansible.builtin.lineinfile:
+      path: /etc/consul.d/config.hcl
+      regexp: 'encrypt'
+      line: '"encrypt" = "{{encrypt_key.stdout}}"'
+
+  - name: Copy consul.service file
+    ansible.builtin.copy:
+      src: templates/consul/consul.service
+      dest: /etc/systemd/system/consul.service
+
+  - name: Start consul server
+    ansible.builtin.service:
+      name: consul
+      state: restarted
+      enabled: yes
+
+# =============================== setup backend servers ======================
+
+- hosts: backend
+  tags: setup backend
+  remote_user: ${remote_user}
+  become: yes
+  vars: 
+    encrypt_key: "{{ hostvars['consul']['consul_encrypt_key'] }}"
+  tasks:
+  
+  - name: Install packages
+    ansible.builtin.apt:
+      name: "{{ item }}"
+      state: latest
+    with_items:
+    - nginx
+
+  - name: Copy nginx index page
+    tags: copy nginx index page
+    ansible.builtin.template:
+      src: templates/backend/index.nginx-debian.html
+      dest: /var/www/html/index.nginx-debian.html
+
+  - name: Start nginx
+    ansible.builtin.service:
+      name: nginx
+      state: started
+      enabled: yes
+
+  - name: Get and unzip consul binary
+    ansible.builtin.unarchive:
+      src: https://hashicorp-releases.yandexcloud.net/consul/1.20.2/consul_1.20.2_linux_amd64.zip
+      dest: /usr/bin/
+      remote_src: yes
+  
+  - name: Add consule user
+    ansible.builtin.user:
+      name: consul
+      comment: Consul service
+
+  - name: Create consul directories
+    ansible.builtin.file:
+      path: "{{ item }}"
+      state: directory
+      owner: consul
+      group: consul
+      mode: '755'
+    with_items:
+      - /var/lib/consul
+      - /etc/consul.d
+
+  - name: Copy consul server config
+    ansible.builtin.copy:
+      src: templates/backend/config.hcl-client
+      dest: /etc/consul.d/config.hcl
+      owner: consul
+      group: consul
+
+  - name: Change encrypt option in config.hcl
+    ansible.builtin.lineinfile:
+      path: /etc/consul.d/config.hcl
+      regexp: 'encrypt'
+      line: '"encrypt" = "{{encrypt_key}}"'
+
+  - name: Copy consul.service file
+    ansible.builtin.copy:
+      src: templates/backend/consul.service
+      dest: /etc/systemd/system/consul.service
+
+  - name: Copy config to register the Nginx service and health check
+    tags: register nginx service
+    ansible.builtin.copy:
+      src: templates/backend/backend.hcl
+      dest: /etc/consul.d/backend.hcl 
+
+  - name: Start consul server
+    ansible.builtin.service:
+      name: consul
+      state: started
+      enabled: yes
+
+# ========================== setup fronend servers ===================================
+
+- hosts: frontend
+  tags: setup frontend
+  remote_user: ubuntu
+  become: yes
+  tasks: 
+
+  - name: Install nginx
+    tags: install nginx
+    ansible.builtin.apt: 
+      name: nginx
+      state: present
+      update_cache: true
+
+  - name: Get and unzip consul-template binary
+    ansible.builtin.unarchive:
+      src: https://cloud.baltbereg.com/index.php/s/EcS3YxG88MiLEm4/download/consul-template_0.39.1_linux_amd64.zip
+      dest: /usr/bin/
+      remote_src: yes
+
+  - name: Create consul-template config directories
+    ansible.builtin.file:
+      path: "{{ item }}"
+      state: directory
+    with_items:
+      - /etc/consul-template.d
+      - /var/lib/consul-template
+
+  - name: Copy consul-template config file
+    tags: copy consultemplate config
+    ansible.builtin.copy:
+      src: 'templates/frontend/consul-template.hcl'
+      dest: '/etc/consul-template.d/consul-template.hcl'
+
+  - name: Copy consul template for nginx config
+    tags: copy consul template
+    ansible.builtin.copy:
+      src: 'templates/frontend/frontend-balancer.conf.ctmpl'
+      dest: '/var/lib/consul-template/frontend-balancer.conf.ctmpl'
+
+  - name: Delete nginx default site
+    tags: delete nginx default site
+    ansible.builtin.file:
+      path: /etc/nginx/sites-enabled/default
+      state: absent
+
+  - name: Copy consul-template.service file
+    tags: consul-template.service
+    ansible.builtin.copy:
+      src: templates/frontend/consul-template.service
+      dest: /etc/systemd/system/consul-template.service
+
+  - name: Start nginx
+    tags: start nginx frontend
+    ansible.builtin.service:
+      name: nginx
+      state: restarted
+      enabled: yes
+
+  - name: Start consul-template
+    ansible.builtin.service:
+      name: consul-template
+      state: started
+      enabled: yes   
+
+
+
+
+

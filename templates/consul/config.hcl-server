@@ -1,0 +1,11 @@
+"bootstrap" = true
+"bind_addr" = "0.0.0.0"
+"client_addr" = "0.0.0.0"
+"encrypt" = ""
+"datacenter" = "dc1"
+"data_dir" = "/var/lib/consul"
+"server" = true
+"log_level" = "INFO"
+ui_config {
+  enabled= true
+}
